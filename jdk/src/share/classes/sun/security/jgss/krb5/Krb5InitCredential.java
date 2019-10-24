@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000, 2012, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2000, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,6 +55,7 @@ public class Krb5InitCredential
 
     private Krb5NameElement name;
     private Credentials krb5Credentials;
+    public KerberosTicket proxyTicket;
 
     private Krb5InitCredential(Krb5NameElement name,
                                byte[] asn1Encoding,
@@ -153,7 +154,7 @@ public class Krb5InitCredential
                                        Krb5MechFactory.NT_GSS_KRB5_PRINCIPAL);
         }
 
-        return new Krb5InitCredential(name,
+        Krb5InitCredential result = new Krb5InitCredential(name,
                                       tgt.getEncoded(),
                                       tgt.getClient(),
                                       tgt.getServer(),
@@ -165,6 +166,9 @@ public class Krb5InitCredential
                                       tgt.getEndTime(),
                                       tgt.getRenewTill(),
                                       tgt.getClientAddresses());
+        result.proxyTicket = KerberosSecrets.getJavaxSecurityAuthKerberosAccess().
+            kerberosTicketGetProxy(tgt);
+        return result;
     }
 
     static Krb5InitCredential getInstance(Krb5NameElement name,
@@ -234,14 +238,13 @@ public class Krb5InitCredential
      * @exception GSSException may be thrown
      */
     public int getInitLifetime() throws GSSException {
-        int retVal = 0;
         Date d = getEndTime();
         if (d == null) {
             return 0;
         }
-        retVal = (int)(d.getTime() - (new Date().getTime()));
 
-        return retVal/1000;
+        long retVal = d.getTime() - System.currentTimeMillis();
+        return (int)(retVal/1000);
     }
 
     /**
@@ -335,9 +338,9 @@ public class Krb5InitCredential
                 public KerberosTicket run() throws Exception {
                     // It's OK to use null as serverPrincipal. TGT is almost
                     // the first ticket for a principal and we use list.
-                    return Krb5Util.getTicket(
+                    return Krb5Util.getInitialTicket(
                         realCaller,
-                        clientPrincipal, null, acc);
+                        clientPrincipal, acc);
                         }});
         } catch (PrivilegedActionException e) {
             GSSException ge =
