@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -147,7 +147,7 @@ HS_DTRACE_PROBE_DECL5(hotspot, class__initialization__end,
       len = name->utf8_length();                                 \
     }                                                            \
     HOTSPOT_CLASS_INITIALIZATION_##type(                         \
-      data, len, (clss)->class_loader(), thread_type);           \
+      data, len, (void *)(clss)->class_loader(), thread_type); \
   }
 
 #define DTRACE_CLASSINIT_PROBE_WAIT(type, clss, thread_type, wait) \
@@ -160,7 +160,7 @@ HS_DTRACE_PROBE_DECL5(hotspot, class__initialization__end,
       len = name->utf8_length();                                 \
     }                                                            \
     HOTSPOT_CLASS_INITIALIZATION_##type(                         \
-      data, len, (clss)->class_loader(), thread_type, wait);     \
+      data, len, (void *)(clss)->class_loader(), thread_type, wait); \
   }
 #endif /* USDT2 */
 
@@ -581,7 +581,7 @@ bool InstanceKlass::verify_code(
   // 1) Verify the bytecodes
   Verifier::Mode mode =
     throw_verifyerror ? Verifier::ThrowException : Verifier::NoException;
-  return Verifier::verify(this_oop, mode, this_oop->should_verify_class(), CHECK_false);
+  return Verifier::verify(this_oop, mode, this_oop->should_verify_class(), THREAD);
 }
 
 
@@ -1195,7 +1195,7 @@ Klass* InstanceKlass::array_klass_impl(instanceKlassHandle this_oop, bool or_nul
   if (or_null) {
     return oak->array_klass_or_null(n);
   }
-  return oak->array_klass(n, CHECK_NULL);
+  return oak->array_klass(n, THREAD);
 }
 
 Klass* InstanceKlass::array_klass_impl(bool or_null, TRAPS) {
@@ -2925,6 +2925,13 @@ void InstanceKlass::adjust_default_methods(InstanceKlass* holder, bool* trace_na
 
 // On-stack replacement stuff
 void InstanceKlass::add_osr_nmethod(nmethod* n) {
+#ifndef PRODUCT
+  if (TieredCompilation) {
+      nmethod * prev = lookup_osr_nmethod(n->method(), n->osr_entry_bci(), n->comp_level(), true);
+      assert(prev == NULL || !prev->is_in_use(),
+      "redundunt OSR recompilation detected. memory leak in CodeCache!");
+  }
+#endif
   // only one compilation can be active
   NEEDS_CLEANUP
   // This is a short non-blocking critical region, so the no safepoint check is ok.
@@ -3046,7 +3053,9 @@ nmethod* InstanceKlass::lookup_osr_nmethod(const Method* m, int bci, int comp_le
     osr = osr->osr_link();
   }
   OsrList_lock->unlock();
-  if (best != NULL && best->comp_level() >= comp_level && match_level == false) {
+
+  assert(match_level == false || best == NULL, "shouldn't pick up anything if match_level is set");
+  if (best != NULL && best->comp_level() >= comp_level) {
     return best;
   }
   return NULL;
